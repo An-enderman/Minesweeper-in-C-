@@ -32,15 +32,14 @@ using namespace std;
 // Difficile: 24, 20, 99
 
 /** 
-	0-8: mines nearby
-	
-	9 has mine
-	10 flagged
+	0:uncovered
+	1:covered
+	2:flagged
 **/
 struct s_tile{
-	bool flagged;
-	bool covered;
-	int tile_state;
+	bool hasMine;
+	unsigned short tileState;
+	unsigned short adiacent_mines_num;
 };
 
 struct s_data{
@@ -54,23 +53,27 @@ struct s_data{
 }minefield;
 
 struct settings{
-	int Color_num_1;
-	int Color_num_2;
-	int Color_num_3;
-	int Color_num_4;
-	int Color_num_5;
-	int Color_num_6;
-	int Color_num_7;
-	int Color_num_8;
-	int BgColor;
-	int BorderColor;
-	int textColor;
+	bool oldGeneration = false;
+	bool secondaryInfo = false;
+	int Color_num_1 = BLUE;
+	int Color_num_2 = GREEN;
+	int Color_num_3 = RED;
+	int Color_num_4 = NAVY;
+	int Color_num_5 = MAROON;
+	int Color_num_6 = AQUA;
+	int Color_num_7 = WHITE;
+	int Color_num_8 = GRAY;
+	int BgColor = BLACK;
+	int BorderColor = WHITE;
+	int textColor = WHITE;
 }settings;
 
 int CurColorNum = 15;
+int pressed = 1;
+int one_dim_pos = 0;
 bool Uncover = false;
 bool game_ended = false;
-string curMenu = "main";
+string curMenu = "Main";
 
 void imput_data();//Permette di dare in imput i dati del campo
 
@@ -80,31 +83,49 @@ void Render_frame(int, int, int);//disegna la cornice del campo minato
 void Render_mines(int, int, int);//disegna le mine sul campo minato
 void Render_numbers(int, int);//disegna i numeri sul campo minato
 void Random_mine_insert();//inserisce mine a caso nel campo minato
+void Random_mine_insert2(int, int);//inserisce mine a caso nel campo minato evitando la posizione data
+void Blank_minefield();//crea un campo minato vuoto
+
+/**FUNZIONI DI GESTIONE CAMPO MINATO**/
+bool isCurTileInState(int);
+void setCurTileState(int);
+bool adiacentExists(int);
+bool isAdiacentState(int, int);
+int getCurTileAdiacentMinesNum(); //get's you the amount of mines surrounding the tile where you are on.
+void DetectPressMinefield(int, string);
+void AutoPressMinefield(string);
+void UncoverNear(int);
+void fillUncover();
 
 /**FUNZIONI DI GENERAZIONE DEI MENU**/
 void GameIntro();
 void Menu();
 void Difficulty();
 void Playfield();
+void Settings();
 void Credits();
 
+/**FUNZIONI DI GESTIONE DEI MENU**/
+void DetectPressMenu(int, int, string);
+void optionHighlight(string, int, int);
+void boolOptionHighlight(string, int, int, bool);
+void MoveInMenu(int, int, int&, int, int);
+
 /**MISCELLANEOUS**/
-void optionHighlight(string, string, string, int, int);
-void MoveInMenuV2(int, int, int, int&, int, int);
-void DetectPress(int, int, int, int, string);
 int changeGameState();
-void DetectPressMinefield(int, int, string);
-void setColorV2(int, int);
+void setColor(int, int);
+void setBackgroundColor(int);
+void setTextColor(int);
 void swapColors();
-void UncoverAdiacent();
-void ReloadLanguage(string);
+void ReloadOnButtonPress(int);
+void WaitForPress();
+
 
 int main(){
 	srand(time(NULL));
 	GameIntro();
 	do{
-	
-		if(curMenu == "main"){
+		if(curMenu == "Main"){
 			Menu();
 		}
 		
@@ -116,22 +137,17 @@ int main(){
 			Playfield();
 		}
 		
+		if(curMenu == "Settings"){
+			Settings();
+		}
+		
 		if(curMenu == "Credits"){
 			Credits();
 		}
-	}while(curMenu != "gameExit");
+	}while(curMenu != "GameExit");
 	
 	return 0;
 }//fine main
-
-void imput_data(){
-	do{
-		
-	}while(minefield.width < 3);
-	do{
-		
-	}while(minefield.height < 3);
-}//end imput_data
 
 /********************************************/
 /**FUNZIONI DI GENERAZIONE DEL CAMPO MINATO**/
@@ -148,15 +164,18 @@ void Render_minefield(int state){
 		}
 		cout<<endl;
 	}
-	if(state > 0){
+	if(state == 1){
 		cout<<"You won"<<endl<<endl;
-		setColorV2(GRAY, BLACK);
+		setColor(GRAY, BLACK);
 		cout<<"*press any key*";
-	}else if(state<0){
+	}else if(state == -1){
 		cout<<"Game over"<<endl<<endl;
-		setColorV2(GRAY, BLACK);
+		setColor(GRAY, BLACK);
 		cout<<"*press any key*";
-	}else{
+	}else if(state == -2){
+		cout<<"SPACE - uncover tiles"<<endl;
+	}else if(state == 0){
+		if (settings.secondaryInfo)cout<<"Minefield size ("<<minefield.width<<" x "<<minefield.height<<")"<<endl;
 		cout<<"Flags: "<<minefield.flag_rem<<endl;
 		cout<<"SPACE - uncover tiles"<<endl;
 		cout<<"ENTER - places/removes flags"<<endl;
@@ -172,13 +191,12 @@ void Render_frame(int i, int j, int state){
 	char Vertical_line = 186;
 	char Horizontal_line = 205;
 	if(state == -1){
-		setColorV2(RED, BLACK);
+		setColor(RED, BLACK);
 	}else if(state == 1){
-		setColorV2(GREEN, BLACK);
+		setColor(GREEN, BLACK);
 	}else{
-		setColorV2(WHITE, BLACK);
+		setColor(WHITE, BLACK);
 	}
-	
 	
 	if(i == -1){
 		if(j == -1){
@@ -205,75 +223,77 @@ void Render_mines(int i, int j, int gamestate){
 	int state;
 	char mine = 207;
 	char flag = 158;
-	state = minefield.tile[i][j].tile_state;
-	if(gamestate > 0){
-		minefield.tile[i][j].covered = false;
-		setColorV2(GREEN, BLACK);
-		if(state == 9){
+	state = minefield.tile[i][j].tileState;
+	if(gamestate == 1){
+		setColor(GREEN, BLACK);
+		if (minefield.tile[i][j].hasMine){
 			cout<<flag;
-		}else if(state == 0){
-			cout<<" ";
 		}else{
-			cout<<minefield.tile[i][j].tile_state;
+			if(minefield.tile[i][j].adiacent_mines_num == 0){
+				cout<<" ";
+			}else{
+				cout<<minefield.tile[i][j].adiacent_mines_num;
+			}
 		}
-	}else if(gamestate < 0){
-		minefield.tile[i][j].covered = false;
-		setColorV2(RED, BLACK);
-		if(state == 9){
+	}else if(gamestate == -1){
+		if (minefield.tile[i][j].hasMine){
 			cout<<mine;
-		}else if(state == 0){
-			cout<<" ";
 		}else{
-			cout<<minefield.tile[i][j].tile_state;
+			if(minefield.tile[i][j].adiacent_mines_num == 0){
+				cout<<" ";
+			}else{
+				cout<<minefield.tile[i][j].adiacent_mines_num;
+			}
 		}
 	}else{
 		if(Uncover == true){
-			minefield.tile[i][j].covered = false;
+			minefield.tile[i][j].tileState = 0;
 		}
-		setColorV2(WHITE, BLACK);
-		state = minefield.tile[i][j].tile_state;
-		if(minefield.tile[i][j].covered == true && minefield.tile[i][j].flagged == true){
-			setColorV2(LIME, BLACK);
+		setColor(WHITE, BLACK);
+		state = minefield.tile[i][j].adiacent_mines_num;
+		if(minefield.tile[i][j].tileState == 2){
+			setColor(LIME, BLACK);
 			if(i == minefield.curs_y && j == minefield.curs_x)swapColors();
 			cout<<flag;
-		}else if(minefield.tile[i][j].covered == true && minefield.tile[i][j].flagged == false){
+		}else if(minefield.tile[i][j].tileState == 1){
 			if(i == minefield.curs_y && j == minefield.curs_x)swapColors();
 			char dirt = 176;
 			cout<<dirt;
-		}else if(minefield.tile[i][j].covered == false && minefield.tile[i][j].flagged == false){
+		}else if(minefield.tile[i][j].tileState == 0){
+			setBackgroundColor(BLACK);
 			switch(state){
 				case 1:
-					setColorV2(BLUE, BLACK);
+					setTextColor(settings.Color_num_1);
 				break;
 				case 2:
-					setColorV2(GREEN, BLACK);
+					setTextColor(settings.Color_num_2);
 				break;
 				case 3:
-					setColorV2(RED, BLACK);
+					setTextColor(settings.Color_num_3);
 				break;
 				case 4:
-					setColorV2(NAVY, BLACK);
+					setTextColor(settings.Color_num_4);
 				break;
 				case 5:
-					setColorV2(MAROON, BLACK);
+					setTextColor(settings.Color_num_5);
 				break;
 				case 6:
-					setColorV2(AQUA, BLACK);
+					setTextColor(settings.Color_num_6);
 				break;
 				case 7:
-					setColorV2(WHITE, BLACK);
+					setTextColor(settings.Color_num_7);
 				break;
 				case 8:
-					setColorV2(GRAY, BLACK);
+					setTextColor(settings.Color_num_8);
 				break;
 				case 9:
-					setColorV2(RED, BLACK);
+					setTextColor(RED);
 				break;
 			}
 			if(i == minefield.curs_y && j == minefield.curs_x && state != 0){
 				swapColors();
 			}else if(i == minefield.curs_y && j == minefield.curs_x && state == 0){
-				setColorV2(BLACK, WHITE);
+				setColor(BLACK, WHITE);
 			}
 			if(state <= 0){
 				cout<<" ";
@@ -283,7 +303,7 @@ void Render_mines(int i, int j, int gamestate){
 				cout<<state;
 			}
 		}
-		setColorV2(WHITE, BLACK);
+		setColor(WHITE, BLACK);
 	}
 }//end Render_mines
 
@@ -296,9 +316,9 @@ void Random_mine_insert(){
 	minefield.flag_rem = minefield.mine_tot;
 	for(int i = 0; i < minefield.height; i++){
 		for(int j = 0; j < minefield.width; j++){
-			minefield.tile[i][j].tile_state = 0;
-			minefield.tile[i][j].covered = true;
-			minefield.tile[i][j].flagged = false;
+			minefield.tile[i][j].adiacent_mines_num = 0;
+			minefield.tile[i][j].hasMine = false;
+			minefield.tile[i][j].tileState = 1;
 		}
 	}
 	
@@ -307,10 +327,10 @@ void Random_mine_insert(){
 			allow = true;
 			x = rand() % minefield.width + 0;
 			y = rand() % minefield.height + 0;
-			if(minefield.tile[y][x].tile_state == 9){
+			if(minefield.tile[y][x].hasMine == true){
 				allow = false;
 			}else{
-				minefield.tile[y][x].tile_state = 9;
+				minefield.tile[y][x].hasMine = true;
 			}
 		}while(allow == false);
 	}
@@ -318,12 +338,63 @@ void Random_mine_insert(){
 	allow = false; // togliere un uguale
 	for(int i = 0; i < minefield.height; i++){
 		for(int j = 0; j < minefield.width; j++){
-			if(minefield.tile[i][j].tile_state == 9){
+			if(minefield.tile[i][j].hasMine){
 				Render_numbers(i, j);
 			}
 		}
 	}
 }//end Random_mine_insert
+
+void Random_mine_insert2(int xPress, int yPress){
+	int x;
+	int y;
+	srand(time(NULL));
+	bool allow = true;
+	int mines = minefield.mine_tot;
+	minefield.flag_rem = minefield.mine_tot;
+	for(int i = 0; i < minefield.height; i++){
+		for(int j = 0; j < minefield.width; j++){
+			minefield.tile[i][j].adiacent_mines_num = 0;
+			minefield.tile[i][j].hasMine = false;
+			minefield.tile[i][j].tileState = 1;
+		}
+	}
+	
+	for(int i = 0; i<mines; i++){
+		do{
+			allow = true;
+			x = rand() % minefield.width + 0;
+			y = rand() % minefield.height + 0;
+			if(minefield.tile[y][x].hasMine || (x <= xPress+1 && x >= xPress-1 && y <= yPress+1 && y >= yPress-1)){
+				allow = false;
+			}else{
+				minefield.tile[y][x].hasMine = true;
+			}
+		}while(allow == false);
+	}
+	
+	allow = false;
+	for(int i = 0; i < minefield.height; i++){
+		for(int j = 0; j < minefield.width; j++){
+			if(minefield.tile[i][j].hasMine){
+				Render_numbers(i, j);
+			}
+		}
+	}
+}//end Random_mine_insert2
+
+void Blank_minefield(){
+	srand(time(NULL));
+	bool allow = true;
+	int mines = minefield.mine_tot;
+	minefield.flag_rem = minefield.mine_tot;
+	for(int i = 0; i < minefield.height; i++){
+		for(int j = 0; j < minefield.width; j++){
+			minefield.tile[i][j].adiacent_mines_num = 0;
+			minefield.tile[i][j].tileState = 1;
+		}
+	}
+}//end Blank_minefield
 
 void Render_numbers(int y, int x){
     for(int i = -1; i < 2; i++){
@@ -333,10 +404,9 @@ void Render_numbers(int y, int x){
             
             //Controlli per evitare accessi fuori dai limiti dell'array
         
-            if(ni >= 0 && ni < minefield.height && nj >= 0 && nj < minefield.width && minefield.tile[y][x].tile_state == 9) {
-                if(minefield.tile[ni][nj].tile_state != 9){
-                    minefield.tile[ni][nj].tile_state++;
-                    
+            if(ni >= 0 && ni < minefield.height && nj >= 0 && nj < minefield.width && minefield.tile[y][x].hasMine == true) {
+                if(minefield.tile[ni][nj].adiacent_mines_num != 9){
+                    minefield.tile[ni][nj].adiacent_mines_num++;
             		/*
 					ni >= 0 verifica che l'indice di riga non sia inferiore a 0.
 					ni < minefield.height verifica che l'indice di riga non sia maggiore o uguale all'altezza del campo minato.
@@ -349,251 +419,131 @@ void Render_numbers(int y, int x){
     }
 }//end Render_numbers
 
+/*************************************/
+/**FUNZIONI DI GESTIONE CAMPO MINATO**/
+/*************************************/
 
-/************************************/
-/**FUNZIONI DI GENERAZIONE DEI MENU**/
-/************************************/
+bool isCurTileInState(int state){
+	if(minefield.tile[minefield.curs_y][minefield.curs_x].tileState == state)return true;
+	return false;
+}//end isCurTileInState
 
-void GameIntro(){
-	setColorV2(WHITE, BLACK);
-    cout<<"After an year of coding"<<endl;
-    Sleep(1000);
-    system("cls");
-    cout<<"I present to you"<<endl;
-    Sleep(1000);
-    system("cls");
-    cout<<"MINESWEEPER"<<endl;
-    Sleep(1000);
-    system("cls");
-    cout<<"MINESWEEPER IN"<<endl;
-    Sleep(500);
-    system("cls");
-    cout<<"MINESWEEPER IN C"<<endl;
-    Sleep(500);
-    system("cls");
-    cout<<"MINESWEEPER IN C+"<<endl;
-    Sleep(500);
-    system("cls");
-}//GameIntro
+void setCurTileState(int state){
+	minefield.tile[minefield.curs_y][minefield.curs_x].tileState = state;
+}//end setCurTileState
 
-void Menu(){
-	int pressed = 1;
-	int curOpt = 0;
-	do{
-		setColorV2(WHITE, BLACK);
-		cout<<"MINESWEEPER IN C++"<<endl<<endl<<endl;
-		optionHighlight(">", "Play", "<", 0, curOpt);
-		cout<<endl;
-		optionHighlight(">", "Settings(WIP)", "<", 1, curOpt);
-		cout<<endl;
-		optionHighlight(">", "Credits", "<", 2, curOpt);
-		cout<<endl<<endl;
-		optionHighlight(">", "exit", "<", 3, curOpt);
-		cout<<endl;
-		pressed = getch();
-		
-		MoveInMenuV2(pressed, 119, 115, curOpt, 0, 3);
-		MoveInMenuV2(pressed, 72, 80, curOpt, 0, 3);
-		
-		DetectPress(13, pressed, 0, curOpt, "DifficultySelect");
-		DetectPress(32, pressed, 0, curOpt, "DifficultySelect");
-		
-		DetectPress(13, pressed, 2, curOpt, "toCredits");
-		DetectPress(32, pressed, 2, curOpt, "toCredits");
-
-		DetectPress(13, pressed, 3, curOpt, "exit");
-		DetectPress(32, pressed, 3, curOpt, "exit");
-		
-		system("cls");
-		
-	}while(curMenu == "main");
-}//end Menu
-
-void Difficulty(){
-	int pressed = 1;
-	int curOpt = 0;
-	do{
-		cout<<"Choose the difficulty"<<endl<<endl;
-		optionHighlight(">", "Easy", "<", 0, curOpt);
-		cout<<endl;
-		optionHighlight(">", "Medium", "<", 1, curOpt);
-		cout<<endl;
-		optionHighlight(">", "Hard", "<", 2, curOpt);
-		cout<<endl<<endl;
-		optionHighlight(">", "exit", "<", 3, curOpt);
-		cout<<endl;
-		pressed = getch();
-
-		MoveInMenuV2(pressed, 119, 115, curOpt, 0, 3);
-		MoveInMenuV2(pressed, 72, 80, curOpt, 0, 3);
-		
-		DetectPress(13, pressed, 3, curOpt, "toMain");
-		DetectPress(32, pressed, 3, curOpt, "toMain");
-		if((pressed == 13 || pressed == 32) && curOpt != 3){
-			if(curOpt == 0){
-				minefield.width = 10;
-				minefield.height = 8;
-				minefield.mine_tot = 10;
-			}else if(curOpt == 1){
-				minefield.width = 18;
-				minefield.height = 14;
-				minefield.mine_tot = 40;
-			}else if(curOpt == 2){
-				minefield.width = 24;
-				minefield.height = 20;
-				minefield.mine_tot = 99;
-			}
-			minefield.flag_rem = minefield.mine_tot;
-			curMenu = "Playfield";
-		}
-		system("cls");
-	}while(curMenu == "Difficulty");
-}//end Menu
-
-void Playfield(){
-	int gameState = 0;
-	int pressed;
-	Random_mine_insert();
-	minefield.curs_x = minefield.width/2;
-	minefield.curs_y = minefield.height/2;
-	do{
-		system("cls");
-		Render_minefield(0);
-		//cout<<endl<<"gamestate:"<<gameState<<endl;
-		pressed = getch();
-		
-		MoveInMenuV2(pressed, 119, 115, minefield.curs_y, 0, minefield.height-1);
-		MoveInMenuV2(pressed, 72, 80, minefield.curs_y, 0, minefield.height-1);
-		
-		MoveInMenuV2(pressed, 97, 100, minefield.curs_x, 0, minefield.width-1);
-		MoveInMenuV2(pressed, 75, 77, minefield.curs_x, 0, minefield.width-1);
-		
-		DetectPressMinefield(13, pressed, "a");
-		DetectPressMinefield(32, pressed, "a");
-		if(pressed == 32 || pressed == 13){
-			gameState = changeGameState();
-		}
-	}while(gameState == 0);
-	system("cls");
-	Render_minefield(gameState);
-	pressed = getch();
-	curMenu = "main";
-	system("cls");
-}//end Playfield
-
-void Credits(){
-	int press;
-	setColorV2(PURPLE, BLACK);
-	cout<<"An_enderman: Programmer and main developer"<<endl<<endl;
-	setColorV2(WHITE, BLACK);
-	cout<<"Prof. Massimo Danese: Programmer (made the code for the numbers that indicates the amounth of adiacent mines)"<<endl<<endl;
-	cout<<"Betatester:"<<endl;
-	setColorV2(FUCHSIA, BLACK);
-	cout<<"Pierluigi Speranza"<<endl;
-	setColorV2(GRAY, BLACK);
-	cout<<"*press any key to exit credits*";
-	press = getch();
-	curMenu = "main";
-	system("cls");
-}//end Credits
-
-/*****************/
-/**MISCELLANEOUS**/
-/*****************/
-
-void optionHighlight(string h1, string text, string h2, int activationNum, int curNum){
-	if(curNum == activationNum)cout<<h1;
-	cout<<text;
-	if(curNum == activationNum)cout<<h2;
-}//end optionHighlight
-
-void MoveInMenuV2(int buttonPr, int buttonDec, int buttonInc, int &pos, int dirmin, int dirmax){
-	if(buttonDec == buttonPr){
-		pos--;
-	}else if(buttonInc == buttonPr)pos++;
-	
-	if(pos < dirmin){
-		pos=dirmax;
-	}else if(pos > dirmax)pos=dirmin;
-}//end MoveInMenuV2
-
-void DetectPress(int button, int buttonPr, int pos, int curPos, string action){
-	if(pos == -1){
-		if(button == buttonPr){
-			
-		}
-	}else{
-		if(button == buttonPr && pos == curPos){
-			if(action == "DifficultySelect"){
-				curMenu = "Difficulty";
-			}else if(action == "play"){
-				curMenu = "Playfield";
-			}else if(action == "exit"){
-				curMenu = "gameExit";
-			}else if(action == "toMain"){
-				curMenu = "main";
-			}else if(action == "toCredits"){
-				curMenu = "Credits";
-			}
-		}		
+bool adiacentExists(int tile){
+	switch(tile){
+		case 0:
+			if(0<=(minefield.curs_x-1) && (minefield.curs_x-1)<minefield.width && 0<=(minefield.curs_y-1) && (minefield.curs_y-1)<minefield.width)return true;
+		break;
+		case 1:
+			if(0<=minefield.curs_x && minefield.curs_x<minefield.width && 0<=(minefield.curs_y-1) && (minefield.curs_y-1)<minefield.width)return true;
+		break;
+		case 2:
+			if(0<=(minefield.curs_x+1) && (minefield.curs_x+1)<minefield.width && 0<=(minefield.curs_y-1) && (minefield.curs_y-1)<minefield.width)return true;
+		break;
+		case 3:
+			if(0<=(minefield.curs_x-1) && (minefield.curs_x-1)<minefield.width && 0<=minefield.curs_y && minefield.curs_y-1<minefield.width)return true;
+		break;
+		case 4:
+			if(0<=(minefield.curs_x+1) && (minefield.curs_x+1)<minefield.width && 0<=minefield.curs_y && minefield.curs_y-1<minefield.width)return true;
+		break;
+		case 5:
+			if(0<=(minefield.curs_x-1) && (minefield.curs_x-1)<minefield.width && 0<=(minefield.curs_y+1) && (minefield.curs_y+1)<minefield.width)return true;
+		break;
+		case 6:
+			if(0<=minefield.curs_x && minefield.curs_x<minefield.width && 0<=(minefield.curs_y+1) && (minefield.curs_y+1)<minefield.width)return true;
+		break;
+		case 7:
+			if(0<=(minefield.curs_x+1) && (minefield.curs_x+1)<minefield.width && 0<=(minefield.curs_y+1) && (minefield.curs_y+1)<minefield.width)return true;
+		break;
 	}
-}//end DetectPress
+	return false;
+}//end adiacentExists
 
-int changeGameState(){
-	int flagged_mines = 0;
-	int uncovered_tiles = 0; 
-	int tot_safe_tiles = (minefield.height * minefield.width)-minefield.mine_tot;
-	for(int y = 0; y<minefield.height; y++){
-		for(int x = 0; x<minefield.width; x++){
-			if(minefield.tile[y][x].tile_state == 9 && minefield.tile[y][x].covered == false){
-				return -1;
-			}else if(minefield.tile[y][x].tile_state == 9 && minefield.tile[y][x].flagged == true){
-				flagged_mines++;
-			}else if(minefield.tile[y][x].tile_state < 9 && minefield.tile[y][x].covered == false){
-				uncovered_tiles++;
-			}
-		}
+bool isAdiacentState(int tile, int state){
+	switch(tile){
+		case 0:
+			if(minefield.tile[minefield.curs_y-1][minefield.curs_x-1].tileState == state)return true;
+		break;
+		case 1:
+			if(minefield.tile[minefield.curs_y-1][minefield.curs_x].tileState == state)return true;
+		break;
+		case 2:
+			if(minefield.tile[minefield.curs_y-1][minefield.curs_x+1].tileState == state)return true;
+		break;
+		case 3:
+			if(minefield.tile[minefield.curs_y][minefield.curs_x-1].tileState == state)return true;
+		break;
+		case 4:
+			if(minefield.tile[minefield.curs_y][minefield.curs_x+1].tileState == state)return true;
+		break;
+		case 5:
+			if(minefield.tile[minefield.curs_y+1][minefield.curs_x-1].tileState == state)return true;
+		break;
+		case 6:
+			if(minefield.tile[minefield.curs_y+1][minefield.curs_x].tileState == state)return true;
+		break;
+		case 7:
+			if(minefield.tile[minefield.curs_y+1][minefield.curs_x+1].tileState == state)return true;
+		break;
 	}
-	if(minefield.mine_tot == flagged_mines && uncovered_tiles == tot_safe_tiles){
-		return 1;
-	}else{
-		return 0;	
-	}
-}//end changeGameState
+	return false;
+}//end isAdiacentState
 
-void DetectPressMinefield(int button, int buttonPr, string action){
-	int tempX = minefield.curs_x;
-	int tempY = minefield.curs_y;
-	if(button == buttonPr){
-		if(minefield.tile[tempY][tempX].covered == true && minefield.tile[tempY][tempX].flagged == false && minefield.flag_rem > 0 && button == 13){
-			minefield.tile[tempY][tempX].flagged = true;
+int getCurTileAdiacentMinesNum(){
+	return minefield.tile[minefield.curs_y][minefield.curs_x].adiacent_mines_num;
+}//end getCurTileAdiacentMinesNum
+
+void DetectPressMinefield(int button, string action){
+	if(button == pressed){
+		if(isCurTileInState(1) && minefield.flag_rem > 0 && action == "changeFlag"){
+			setCurTileState(2);
 			minefield.flag_rem--;
-		}else if(minefield.tile[tempY][tempX].covered == true && minefield.tile[tempY][tempX].flagged == true && button == 13){
-			minefield.tile[tempY][tempX].flagged = false;
+		}else if(isCurTileInState(2) && action == "changeFlag"){
+			setCurTileState(1);
 			minefield.flag_rem++;
-		}else if(minefield.tile[tempY][tempX].covered == true && minefield.tile[tempY][tempX].flagged == false && button == 32){
-			minefield.tile[tempY][tempX].covered = false;
-			if(minefield.tile[tempY][tempX].tile_state == 0){
-				UncoverAdiacent();
+		}else if(isCurTileInState(1) && action == "uncover"){
+			setCurTileState(0);
+			if(getCurTileAdiacentMinesNum() == 0){
+				fillUncover();
 			}
 		}
 	}
-}
+}//end DetectPressMinefield
 
-void setColorV2(int colorText, int colorBackgr){
-	CurColorNum = (colorBackgr * 16) + colorText;
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetConsoleTextAttribute(hConsole, CurColorNum);
-}//end setColorV2
+void AutoPressMinefield(string action){
+	if(isCurTileInState(1) && minefield.flag_rem > 0 && action == "changeFlag"){
+		setCurTileState(2);
+		minefield.flag_rem--;
+	}else if(isCurTileInState(2) && action == "changeFlag"){
+		setCurTileState(1);
+		minefield.flag_rem++;
+	}else if(isCurTileInState(1) && action == "uncover"){
+		setCurTileState(0);
+		if(getCurTileAdiacentMinesNum() == 0){
+			fillUncover();
+		}
+	}
+}//end AutoPressMinefield
 
-void swapColors(){
-	int bg, text;
-	bg = CurColorNum/16;
-	text = CurColorNum%16;
-	setColorV2(bg, text);
-}//end swapColors
+void UncoverNear(int x, int y){
+	for(int i = -1; i < 2; i++){
+        for(int j = -1; j < 2; j++){
+			if((j != 0 && i != 0) || y+i>=0 || y+i<minefield.height || x+j>=0 || x+j<minefield.width){
+				if(minefield.tile[y+i][x+j].tileState == 1){
+					minefield.tile[y+i][x+j].tileState = 0;
+					if(minefield.tile[y+i][x+j].adiacent_mines_num == 0){
+						
+					}
+				}
+			}
+		}
+	}
+}//end UncoverNear
 
-void UncoverAdiacent(){
+void fillUncover(){
 	int rappArr[minefield.height][minefield.width];
 	
 	//generare il campo iniziale
@@ -619,7 +569,7 @@ void UncoverAdiacent(){
             				//Controlli per evitare accessi fuori dai limiti dell'array
             				if(ny >= 0 && ny < minefield.height && nx >= 0 && nx < minefield.width){
                 				if((i != 0 || j != 0) && rappArr[ny][nx] == 0){
-                					if(minefield.tile[ny][nx].tile_state == 0){
+                					if(minefield.tile[ny][nx].adiacent_mines_num == 0){
 										rappArr[ny][nx] = 1;
 									}else{
 										rappArr[ny][nx] = 2;
@@ -643,11 +593,338 @@ void UncoverAdiacent(){
 	//scoprire gli spazi corretti
 	for(int y = 0; y<minefield.height; y++){
 		for(int x = 0; x<minefield.width; x++){
-			if(rappArr[y][x]==2)minefield.tile[y][x].covered = false;
+			if(rappArr[y][x]==2)minefield.tile[y][x].tileState = 0;
 		}
 	}
-}//end UncoverAdiacent
+}//end fillUncover
 
-void PreloadLanguage(string lang){
+/************************************/
+/**FUNZIONI DI GENERAZIONE DEI MENU**/
+/************************************/
+
+void GameIntro(){
+	setColor(WHITE, BLACK);
+    cout<<"MINESWEEPER"<<endl;
+    Sleep(500);
+    system("cls");
+    cout<<"MINESWEEPER IN"<<endl;
+    Sleep(500);
+    system("cls");
+    cout<<"MINESWEEPER IN C"<<endl;
+    Sleep(500);
+    system("cls");
+    cout<<"MINESWEEPER IN C+"<<endl;
+    Sleep(500);
+    system("cls");
+}//end GameIntro
+
+void Menu(){
+	one_dim_pos = 0;
+	do{
+		setColor(WHITE, BLACK);
+		cout<<"MINESWEEPER IN C++"<<endl<<endl<<endl;
+		optionHighlight("Play", 0, one_dim_pos);
+		cout<<endl;
+		optionHighlight("Settings", 1, one_dim_pos);
+		cout<<endl;
+		optionHighlight("Credits", 2, one_dim_pos);
+		cout<<endl<<endl;
+		optionHighlight("exit", 3, one_dim_pos);
+		cout<<endl;
+		WaitForPress();
+		
+		MoveInMenu(119, 115, one_dim_pos, 0, 3);
+		MoveInMenu(72, 80, one_dim_pos, 0, 3);
+		
+		DetectPressMenu(13, 0, "Difficulty");
+		DetectPressMenu(32, 0, "Difficulty");
+		
+		DetectPressMenu(13, 1, "Settings");
+		DetectPressMenu(32, 1, "Settings");
+		
+		DetectPressMenu(13, 2, "Credits");
+		DetectPressMenu(32, 2, "Credits");
+
+		DetectPressMenu(13, 3, "GameExit");
+		DetectPressMenu(32, 3, "GameExit");
+		
+		system("cls");
+	}while(curMenu == "Main");
+}//end Menu
+
+void Difficulty(){
+	one_dim_pos = 0;
+	do{
+		cout<<"CLASSIC"<<endl<<endl;
+		optionHighlight("Easy", 0, one_dim_pos);
+		cout<<endl;
+		optionHighlight("Medium", 1, one_dim_pos);
+		cout<<endl;
+		optionHighlight("Hard", 2, one_dim_pos);
+		cout<<endl;
+		optionHighlight("Expert", 3, one_dim_pos);
+		cout<<endl<<endl;
+		cout<<"ENDLESS (WIP)"<<endl<<endl;
+		cout<<"SHUFFLE (WIP)"<<endl<<endl;
+		
+		optionHighlight("exit", 4, one_dim_pos);
+		cout<<endl;
+		WaitForPress();
+
+		MoveInMenu(119, 115, one_dim_pos, 0, 4);
+		MoveInMenu(72, 80, one_dim_pos, 0, 4);
+		
+		DetectPressMenu(13, 4, "Main");
+		DetectPressMenu(32, 4, "Main");
+		if((pressed == 13 || pressed == 32) && one_dim_pos != 4){
+			switch (one_dim_pos)
+			{
+				case 0:
+					minefield.width = 10;
+					minefield.height = 8;
+					minefield.mine_tot = 10;
+				break;
+				case 1:
+					minefield.width = 18;
+					minefield.height = 14;
+					minefield.mine_tot = 40;
+				break;
+				case 2:
+					minefield.width = 24;
+					minefield.height = 20;
+					minefield.mine_tot = 99;
+				break;
+				case 3:
+					minefield.width = 28;
+					minefield.height = 24;
+					minefield.mine_tot = 110;
+				break;
+				default:
+				break;
+			}
+			minefield.flag_rem = minefield.mine_tot;
+			curMenu = "Playfield";
+		}
+		system("cls");
+	}while(curMenu == "Difficulty");
+}//end Menu
+
+void Playfield(){
+	int gameState = 0;
+	minefield.curs_x = minefield.width/2;
+	minefield.curs_y = minefield.height/2;
+	if(settings.oldGeneration == false){
+		Blank_minefield();
+		do{
+			system("cls");
+			Render_minefield(-2);
+			WaitForPress();
+		
+			MoveInMenu(119, 115, minefield.curs_y, 0, minefield.height-1);
+			MoveInMenu(72, 80, minefield.curs_y, 0, minefield.height-1);
+		
+			MoveInMenu(97, 100, minefield.curs_x, 0, minefield.width-1);
+			MoveInMenu(75, 77, minefield.curs_x, 0, minefield.width-1);
+		
+			DetectPressMinefield(32, "uncover");
+		}while(pressed != 32);
+		Random_mine_insert2(minefield.curs_x, minefield.curs_y);
+		Render_minefield(0);
+		AutoPressMinefield("uncover");
+	}else{
+		Random_mine_insert();
+	}
 	
+	do{
+		system("cls");
+		Render_minefield(0);
+		WaitForPress();
+		
+		MoveInMenu(119, 115, minefield.curs_y, 0, minefield.height-1);
+		MoveInMenu(72, 80, minefield.curs_y, 0, minefield.height-1);
+		
+		MoveInMenu(97, 100, minefield.curs_x, 0, minefield.width-1);
+		MoveInMenu(75, 77, minefield.curs_x, 0, minefield.width-1);
+		
+		DetectPressMinefield(13, "changeFlag");
+		DetectPressMinefield(32, "uncover");
+		DetectPressMinefield(27, "exit");
+		if(pressed == 32 || pressed == 13){
+			gameState = changeGameState();
+		}else if(pressed == 27){
+			gameState = -2;
+		}
+	}while(gameState == 0);
+	system("cls");
+	if(gameState != -2){
+		Render_minefield(gameState);
+		WaitForPress();
+		system("cls");
+	}
+	curMenu = "Main";
+}//end Playfield
+
+void Settings(){
+	one_dim_pos = 0;
+	do{
+		system("cls");
+		setColor(WHITE, BLACK);
+		cout<<"SETTINGS"<<endl<<endl;
+		boolOptionHighlight("old generation", 0, one_dim_pos, settings.oldGeneration);
+		cout<<endl;
+		boolOptionHighlight("show secondary info", 1, one_dim_pos, settings.secondaryInfo);
+		cout<<endl<<endl;
+		optionHighlight("exit", 2, one_dim_pos);
+		cout<<endl;
+		
+		WaitForPress();
+		
+		MoveInMenu(119, 115, one_dim_pos, 0, 2);
+		MoveInMenu(72, 80, one_dim_pos, 0, 2);
+		
+		DetectPressMenu(13, 2, "Main");
+		DetectPressMenu(32, 2, "Main");
+		if((pressed == 13 || pressed == 32) && one_dim_pos == 0){
+			settings.oldGeneration = !settings.oldGeneration;
+		}else if((pressed == 13 || pressed == 32) && one_dim_pos == 1){
+			settings.secondaryInfo = !settings.secondaryInfo;
+		}
+	}while(curMenu == "Settings");
+	curMenu = "Main";
+	system("cls");
+}
+
+void Credits(){
+	setColor(PURPLE, BLACK);
+	cout<<"An_enderman: Programmer and main developer"<<endl<<endl;
+	setColor(WHITE, BLACK);
+	cout<<"Prof. Massimo Danese: Programmer (made the code for the numbers that indicates the amounth of adiacent mines)"<<endl<<endl;
+	cout<<"Betatester:"<<endl;
+	setColor(FUCHSIA, BLACK);
+	cout<<"Pierluigi Speranza"<<endl;
+	setColor(GRAY, BLACK);
+	cout<<"*press any key to exit credits*";
+	WaitForPress();
+	curMenu = "Main";
+	system("cls");
+}//end Credits
+
+/*********************************/
+/**FUNZIONI DI GESTIONE DEI MENU**/
+/*********************************/
+
+void DetectPressMenu(int button, int pos, string action){
+	if(pos == -1){
+		if(button == pressed){
+			
+		}
+	}else{
+		if(button == pressed && pos == one_dim_pos){
+			if(action == "Difficulty"){
+				curMenu = "Difficulty";
+			}else if(action == "Playfield"){
+				curMenu = "Playfield";
+			}else if(action == "Settings"){
+				curMenu = "Settings";
+			}else if(action == "GameExit"){
+				curMenu = "GameExit";
+			}else if(action == "Main"){
+				curMenu = "Main";
+			}else if(action == "Credits"){
+				curMenu = "Credits";
+			}
+		}		
+	}
+}//end DetectPress
+
+void optionHighlight(string text, int activationNum, int curNum){
+	if(curNum == activationNum)cout<<">";
+	cout<<text;
+	if(curNum == activationNum)cout<<"<";
+}//end optionHighlight
+
+void boolOptionHighlight(string text, int activationNum, int curNum, bool var){
+	if(curNum == activationNum)cout<<">";
+	cout<<text<<" [";
+	if(var){
+		cout<<"X";
+	}else{
+		cout<<" ";
+	}
+	cout<<"]";
+	if(curNum == activationNum)cout<<"<";
+}//end boolOptionHighlight
+
+void MoveInMenu(int buttonDec, int buttonInc, int &pos, int dirmin, int dirmax){
+	if(buttonDec == pressed){
+		pos--;
+	}else if(buttonInc == pressed)
+		pos++;
+	if(pos < dirmin){
+		pos=dirmax;
+	}else if(pos > dirmax)pos=dirmin;
+}//end MoveInMenu
+
+/*****************/
+/**MISCELLANEOUS**/
+/*****************/
+
+int changeGameState(){
+	int flagged_mines = 0;
+	int uncovered_tiles = 0; 
+	int tot_safe_tiles = (minefield.height * minefield.width)-minefield.mine_tot;
+	for(int y = 0; y<minefield.height; y++){
+		for(int x = 0; x<minefield.width; x++){
+			if(minefield.tile[y][x].hasMine && minefield.tile[y][x].tileState == 0){
+				return -1;
+			}else if(minefield.tile[y][x].hasMine && minefield.tile[y][x].tileState == 2){
+				flagged_mines++;
+			}else if(minefield.tile[y][x].hasMine == false && minefield.tile[y][x].tileState == 0){
+				uncovered_tiles++;
+			}
+		}
+	}
+	if(minefield.mine_tot == flagged_mines && uncovered_tiles == tot_safe_tiles){
+		return 1;
+	}else{
+		return 0;	
+	}
+}//end changeGameState
+
+void setColor(int colorText, int colorBackgr){
+	CurColorNum = (colorBackgr * 16) + colorText;
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, CurColorNum);
+}//end setColor
+
+void setBackgroundColor(int colorBackgr){
+	int prevTextColor=CurColorNum%16;
+	CurColorNum = (colorBackgr * 16) + prevTextColor;
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, CurColorNum);
+}//end setBackgroundColor
+
+void setTextColor(int colorText){
+	int prevBackgroundColor=CurColorNum/16;
+	CurColorNum = (prevBackgroundColor * 16) + colorText;
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, CurColorNum);
+}//end setBackgroundColor
+
+void swapColors(){
+	int bg, text;
+	bg = CurColorNum/16;
+	text = CurColorNum%16;
+	setColor(bg, text);
+}//end swapColors
+
+void ReloadOnButtonPress(int button){
+	if(pressed == button){
+		system("cls");
+		Render_minefield(0);
+	}
+}//end ReloadOnButtonPress
+
+void WaitForPress(){
+	pressed = getch();
 }
